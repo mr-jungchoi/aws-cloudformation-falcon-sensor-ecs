@@ -103,6 +103,14 @@ Parameters:
     Type: Number
     Description: Percentage of instances that can be updated simultaneously during a daemon deployment. Lower values reduce blast radius during updates.
     Default: 10
+  CapacityProviderName:
+    Type: String
+    Default: ""
+    Description: Name of the ECS capacity provider to constrain daemon scheduling. Leave empty to schedule on all instances regardless of capacity provider.
+  TaskDefinitionFamily:
+    Type: String
+    Default: ""
+    Description: Task definition family name. Leave empty to use the stack name. Set this to preserve revision history when migrating from a previous deployment.
 
   EnableResourceLimits:
     Type: String
@@ -168,6 +176,8 @@ Metadata:
         Parameters:
           - DeploymentBakeTimeInMinutes
           - DeploymentDrainPercent
+          - CapacityProviderName
+          - TaskDefinitionFamily
       - Label:
           default: Advanced options for setting resource limits
         Parameters:
@@ -191,7 +201,9 @@ Conditions:
     - !Not [!Equals [!Ref SensorCpuLimit, 0]]
   SetMemoryLimits: !Or
     - !Condition IsResourceLimitsEnabled
-    - !Not [!Equals [ !Ref SensorMemoryLimit, 0]]
+    - !Not [!Equals [!Ref SensorMemoryLimit, 0]]
+  HasCapacityProviderName: !Not [!Equals [!Ref CapacityProviderName, ""]]
+  HasTaskDefinitionFamily: !Not [!Equals [!Ref TaskDefinitionFamily, ""]]
 
 Resources:
   FalconECSTaskDefinition:
@@ -204,11 +216,12 @@ Resources:
         - Name: cs-config
           Host:
             SourcePath: /opt/CrowdStrike/config
-      NetworkMode: host
-      IpcMode: host
-      PidMode: host
-      RuntimePlatform:
-        OperatingSystemFamily: LINUX
+      IpcMode: shared
+      PidMode: shared
+      Family: !If
+        - HasTaskDefinitionFamily
+        - !Ref TaskDefinitionFamily
+        - !Sub "${AWS::StackName}"
       ExecutionRoleArn: !If
         - IsExecutionRoleRequired
         - !Ref ECSExecutionRoleArn
@@ -299,6 +312,10 @@ Resources:
     Properties:
       ClusterArn: !Sub "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ECSClusterName}"
       DaemonName: crowdstrike-falcon-node-daemon
+      CapacityProviderArns: !If
+        - HasCapacityProviderName
+        - - !Sub "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:capacity-provider/${CapacityProviderName}"
+        - !Ref AWS::NoValue
       DeploymentConfiguration:
         BakeTimeInMinutes: !Ref DeploymentBakeTimeInMinutes
         DrainPercent: !Ref DeploymentDrainPercent
