@@ -60,6 +60,17 @@ Parameters:
     AllowedValues:
       - bpf
       - kernel
+  Cloud:
+    Type: String
+    Default: ""
+    Description: CrowdStrike cloud region.
+    AllowedValues:
+      - ""
+      - us-1
+      - us-2
+      - eu-1
+      - us-gov-1
+      - us-gov-2
 
   EnableLogging:
     Type: String
@@ -83,6 +94,15 @@ Parameters:
     Type: String
     Description: Task role name to exec in to the Falcon container. Only required if logging or ECS exec is enabled.
     Default: ""
+
+  DeploymentBakeTimeInMinutes:
+    Type: Number
+    Description: Minutes to wait after a successful daemon deployment before considering it stable. Increase for environments where sensor startup takes longer.
+    Default: 5
+  DeploymentDrainPercent:
+    Type: Number
+    Description: Percentage of instances that can be updated simultaneously during a daemon deployment. Lower values reduce blast radius during updates.
+    Default: 10
 
   EnableResourceLimits:
     Type: String
@@ -131,6 +151,7 @@ Metadata:
           - ProvisioningToken
           - Billing
           - Backend
+          - Cloud
       - Label:
           default: Advanced options for logging
         Parameters:
@@ -142,6 +163,11 @@ Metadata:
           - EnableExecuteCommand
           - ECSExecutionRoleArn
           - ECSTaskRoleArn
+      - Label:
+          default: Advanced options for daemon deployment
+        Parameters:
+          - DeploymentBakeTimeInMinutes
+          - DeploymentDrainPercent
       - Label:
           default: Advanced options for setting resource limits
         Parameters:
@@ -169,19 +195,20 @@ Conditions:
 
 Resources:
   FalconECSTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
+    Type: AWS::ECS::DaemonTaskDefinition
     Properties:
       Volumes:
         - Name: falconstore
           Host:
             SourcePath: /opt/CrowdStrike/falconstore
+        - Name: cs-config
+          Host:
+            SourcePath: /opt/CrowdStrike/config
       NetworkMode: host
       IpcMode: host
       PidMode: host
       RuntimePlatform:
         OperatingSystemFamily: LINUX
-      RequiresCompatibilities:
-        - EC2
       ExecutionRoleArn: !If
         - IsExecutionRoleRequired
         - !Ref ECSExecutionRoleArn
@@ -246,11 +273,15 @@ Resources:
               Value: !Ref Billing
             - Name: FALCONCTL_OPT_BACKEND
               Value: !Ref Backend
+            - Name: FALCONCTL_OPT_CLOUD
+              Value: !Ref Cloud
           Cpu: !Ref SensorCpuReservation
           MemoryReservation: !Ref SensorMemoryReservation
           MountPoints:
             - ContainerPath: /opt/CrowdStrike/falconstore
               SourceVolume: falconstore
+            - ContainerPath: /opt/CrowdStrike/config
+              SourceVolume: cs-config
           Privileged: true
           ReadonlyRootFilesystem: false
           User: 0
@@ -263,15 +294,17 @@ Resources:
                 awslogs-stream-prefix: "falcon-node-sensor"
             - !Ref AWS::NoValue
 
-  FalconECSService:
-    Type: AWS::ECS::Service
+  FalconECSDaemon:
+    Type: AWS::ECS::Daemon
     Properties:
-      Cluster: !Ref ECSClusterName
-      SchedulingStrategy: DAEMON
-      LaunchType: EC2
+      ClusterArn: !Sub "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ECSClusterName}"
+      DaemonName: crowdstrike-falcon-node-daemon
+      DeploymentConfiguration:
+        BakeTimeInMinutes: !Ref DeploymentBakeTimeInMinutes
+        DrainPercent: !Ref DeploymentDrainPercent
+      EnableECSManagedTags: true
       EnableExecuteCommand: !If [IsExecuteCommandEnabled, true, false]
-      ServiceName: crowdstrike-falcon-node-daemon
-      TaskDefinition: !Ref FalconECSTaskDefinition
+      DaemonTaskDefinitionArn: !Ref FalconECSTaskDefinition
 
   FalconECSServiceLogGroup:
     Type: AWS::Logs::LogGroup

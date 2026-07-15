@@ -171,9 +171,10 @@ ECS EC2 cluster.
     <td>Management</td>
     <td>
       <ul>
-        <li>Service name: crowdstrike-falcon-node-daemon</li>
+        <li>Daemon name: crowdstrike-falcon-node-daemon</li>
         <li>Supports ECS Execute Command for troubleshooting</li>
         <li>Persists across instance reboots and cluster scaling events</li>
+        <li>Configurable rolling update behavior via deployment bake time and drain percent</li>
       </ul>
     </td>
   </tr>
@@ -283,17 +284,17 @@ When the deployment is complete, verify the Falcon sensor is running on all EC2 
 ```
 The CloudFormation stack will show `CREATE_COMPLETE` if deployed successfully.
 
-2. Verify the ECS daemon service tasks:
+2. Verify the ECS daemon tasks:
 ```bash
-  SERVICE_NAME=$(aws cloudformation describe-stack-resources \
+  DAEMON_NAME=$(aws cloudformation describe-stack-resources \
     --stack-name falcon-ecs-ec2-daemon-$ECS_EC2_CLUSTER_NAME \
-    --logical-resource-id FalconECSService \
+    --logical-resource-id FalconECSDaemon \
     --query "StackResources[0].PhysicalResourceId" \
     --output text)
   
   aws ecs describe-services \
     --cluster $ECS_EC2_CLUSTER_NAME \
-    --services $SERVICE_NAME \
+    --services $DAEMON_NAME \
     --query "services[0].runningCount"
 ```
 The output should match the number of EC2 instances in your cluster.
@@ -459,6 +460,18 @@ The output should match the number of EC2 instances in your cluster.
         Default: 0<br>
         Example: 1024 (MiB)
       </td>
+    </tr>
+    <tr>
+      <td>DeploymentBakeTimeInMinutes</td>
+      <td>No</td>
+      <td>Minutes to wait after a successful daemon deployment before considering it stable.</td>
+      <td>Default: 5</td>
+    </tr>
+    <tr>
+      <td>DeploymentDrainPercent</td>
+      <td>No</td>
+      <td>Percentage of instances that can be updated simultaneously during a daemon deployment. Lower values reduce blast radius during updates.</td>
+      <td>Default: 10</td>
     </tr>
   </tbody>
 </table>
@@ -645,6 +658,35 @@ of the advanced configuration options, add the parameters to the parameters file
 3. Alternative: Use `--parameter-overrides` to pass the parameters directly to the template.
 
 **Tip:** To see all the deployment steps, see [Deploy on ECS EC2 cluster](#deploy-the-falcon-sensor-on-ecs-ec2-cluster).
+
+### Configure deployment behavior
+Control how sensor updates roll out across your cluster during stack updates. By default, ECS updates 10% of instances
+at a time and waits 5 minutes after each batch before proceeding.
+
+<table>
+  <thead>
+    <tr>
+      <th>Parameter</th>
+      <th>Description</th>
+      <th>Value</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>DeploymentBakeTimeInMinutes</td>
+      <td>Minutes to wait after a successful deployment before marking it stable and proceeding to the next batch</td>
+      <td>Default: 5</td>
+    </tr>
+    <tr>
+      <td>DeploymentDrainPercent</td>
+      <td>Maximum percentage of instances updated simultaneously. On a 10-instance cluster, 10% means 1 instance at a time.</td>
+      <td>Default: 10</td>
+    </tr>
+  </tbody>
+</table>
+
+**Note:** Setting `DeploymentDrainPercent` too high reduces protection coverage during updates. For security sensors,
+conservative values are recommended so the fleet is never broadly unprotected at the same time.
 
 ### Enable logging
 Enable logging to get visibility into the Falcon sensor for Linux operations. By default, logging is disabled.

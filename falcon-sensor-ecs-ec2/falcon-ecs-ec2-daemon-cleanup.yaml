@@ -35,13 +35,11 @@ Conditions:
 
 Resources:
   FalconECSTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
+    Type: AWS::ECS::DaemonTaskDefinition
     Properties:
       PidMode: host
       RuntimePlatform:
         OperatingSystemFamily: LINUX
-      RequiresCompatibilities:
-        - EC2
       TaskRoleArn: !If
         - IsTaskRoleRequired
         - !Ref ECSTaskRoleArn
@@ -90,14 +88,13 @@ Resources:
                 awslogs-stream-prefix: "falcon-node-sensor"
             - !Ref AWS::NoValue
 
-  FalconECSService:
-    Type: AWS::ECS::Service
+  FalconECSCleanupDaemon:
+    Type: AWS::ECS::Daemon
     Properties:
-      Cluster: !Ref ECSClusterName
-      SchedulingStrategy: DAEMON
-      LaunchType: EC2
-      ServiceName: crowdstrike-falcon-cleanup-daemon
-      TaskDefinition: !Ref FalconECSTaskDefinition
+      ClusterArn: !Sub "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ECSClusterName}"
+      DaemonName: crowdstrike-falcon-cleanup-daemon
+      EnableECSManagedTags: true
+      DaemonTaskDefinitionArn: !Ref FalconECSTaskDefinition
 
   FalconECSServiceLogGroup:
     Type: AWS::Logs::LogGroup
